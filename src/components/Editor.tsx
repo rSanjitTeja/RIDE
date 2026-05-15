@@ -1,6 +1,6 @@
 import MonacoEditor from '@monaco-editor/react';
 import type { OpenFile } from '../types';
-import { X } from 'lucide-react';
+import { X, Play } from 'lucide-react';
 
 interface EditorProps {
   openFiles: OpenFile[];
@@ -9,6 +9,7 @@ interface EditorProps {
   onFileSelect: (index: number) => void;
   onContentChange: (content: string | undefined) => void;
   onSave: () => void;
+  onRun: () => void;
   settings: any;
 }
 
@@ -19,6 +20,7 @@ export const Editor: React.FC<EditorProps> = ({
   onFileSelect,
   onContentChange,
   onSave,
+  onRun,
   settings
 }) => {
   const activeFile = openFiles[activeFileIndex];
@@ -26,25 +28,40 @@ export const Editor: React.FC<EditorProps> = ({
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-[#1A1D27] h-full border-r border-border">
       {/* Tabs */}
-      <div className="flex overflow-x-auto bg-[#0F111A] border-b border-border hide-scrollbar">
-        {openFiles.map((file, i) => (
-          <div 
-            key={i}
-            className={`flex items-center px-4 py-2 text-sm cursor-pointer border-r border-border min-w-max transition-colors ${i === activeFileIndex ? 'bg-[#1A1D27] text-accent border-t-2 border-t-accent' : 'text-text-muted hover:bg-surface'}`}
-            onClick={() => onFileSelect(i)}
-          >
-            <span className="mr-2">{file.name}{file.isDirty ? ' •' : ''}</span>
-            <button 
-              className="hover:bg-[#2E3246] rounded p-0.5 text-text-muted hover:text-white"
-              onClick={(e) => {
-                e.stopPropagation();
-                onFileClose(i);
-              }}
+      <div className="flex items-center justify-between bg-[#0F111A] border-b border-border">
+        <div className="flex overflow-x-auto hide-scrollbar">
+          {openFiles.map((file, i) => (
+            <div 
+              key={i}
+              className={`flex items-center px-4 py-2 text-sm cursor-pointer border-r border-border min-w-max transition-colors ${i === activeFileIndex ? 'bg-[#1A1D27] text-accent border-t-2 border-t-accent' : 'text-text-muted hover:bg-surface'}`}
+              onClick={() => onFileSelect(i)}
             >
-              <X size={14} />
+              <span className="mr-2">{file.name}{file.isDirty ? ' •' : ''}</span>
+              <button 
+                className="hover:bg-[#2E3246] rounded p-0.5 text-text-muted hover:text-white"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onFileClose(i);
+                }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {openFiles.length > 0 && (
+          <div className="px-2 flex items-center">
+            <button 
+              onClick={onRun}
+              className="flex items-center space-x-1.5 px-3 py-1 bg-green-500/10 text-green-500 hover:bg-green-500/20 rounded-md transition-all text-xs font-bold uppercase tracking-wider"
+              title="Run Code (Ctrl+Enter)"
+            >
+              <Play size={12} fill="currentColor" />
+              <span>Run</span>
             </button>
           </div>
-        ))}
+        )}
       </div>
 
       {/* Editor Space */}
@@ -52,9 +69,20 @@ export const Editor: React.FC<EditorProps> = ({
         {openFiles.length === 0 ? (
           <div className="absolute inset-0 flex items-center justify-center text-text-muted">
             <div className="text-center">
-              <div className="text-4xl mb-4 opacity-20">NeuralIDE</div>
-              <p>Open a file to start editing</p>
-              <p className="text-xs mt-2 opacity-50">Cmd/Ctrl + S to save</p>
+              <div className="text-4xl mb-4 opacity-20 font-bold tracking-tight">RelantoIDE</div>
+              <div className="space-y-2 opacity-60 text-sm">
+                <p>Select a file from the sidebar to start</p>
+                <div className="flex flex-col items-center gap-1 mt-4 text-[11px] font-mono">
+                  <div className="flex gap-4">
+                    <span className="text-accent">Ctrl + S</span>
+                    <span className="text-text-muted">Save File</span>
+                  </div>
+                  <div className="flex gap-4">
+                    <span className="text-accent">Ctrl + Enter</span>
+                    <span className="text-text-muted">Run Code</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         ) : (
@@ -72,10 +100,15 @@ export const Editor: React.FC<EditorProps> = ({
               bracketPairColorization: { enabled: true },
               cursorBlinking: 'smooth',
               smoothScrolling: true,
+              contextmenu: true,
+              quickSuggestions: true,
             }}
             onMount={(editor, monaco) => {
               editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
                 onSave();
+              });
+              editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+                onRun();
               });
             }}
           />

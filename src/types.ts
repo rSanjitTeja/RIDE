@@ -48,3 +48,20 @@ export interface AppSettings {
     fontFamily: string;
   };
 }
+
+export interface IndexedFile {
+  path: string;
+  name: string;
+  language: string;
+  content: string;
+  lines: number;
+  size: number;
+}
+
+export interface WorkspaceIndex {
+  files: IndexedFile[];
+  totalFiles: number;
+  totalLines: number;
+  indexedAt: Date;
+  folderName: string;
+}

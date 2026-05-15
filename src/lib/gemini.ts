@@ -1,38 +1,69 @@
+import type { Message } from '../types';
+
+/**
+ * Streams a response from the Gemini API with full multi-turn conversation history.
+ * This is what makes it behave like a real agent — it remembers the whole conversation.
+ */
 export const streamGemini = async (
-  prompt: string,
+  conversationHistory: Message[],  // Full history, not just the latest message
   systemPrompt: string,
   apiKey: string,
   modelName: string,
   onChunk: (text: string) => void
 ) => {
-  const modelStr = modelName || 'gemini-1.5-pro-latest';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelStr}:streamGenerateContent?alt=sse&key=${apiKey}`;
+  const model = modelName || 'gemini-2.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
+
+  // Build the multi-turn contents array
+  // Filter out 'system' role messages (those are error messages shown in UI only)
+  // and ensure we alternate user/model correctly
+  const contents = conversationHistory
+    .filter(m => m.role === 'user' || m.role === 'model')
+    .filter(m => m.content.trim().length > 0)
+    .map(m => ({
+      role: m.role === 'user' ? 'user' : 'model',
+      parts: [{ text: m.content }],
+    }));
 
   const payload = {
     system_instruction: {
-      parts: { text: systemPrompt }
+      parts: [{ text: systemPrompt }],
     },
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: prompt }]
-      }
-    ]
+    contents,
+    generationConfig: {
+      temperature: 0.7,
+      topK: 40,
+      topP: 0.95,
+    },
   };
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (e: any) {
+    throw new Error(`Network error: ${e.message}`);
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Gemini API Error: ${response.status} ${errorText}`);
+    let errorMsg = `Gemini API Error (${response.status})`;
+    try {
+      const parsed = JSON.parse(errorText);
+      if (parsed.error?.message) {
+        errorMsg = parsed.error.message;
+      }
+    } catch {
+      errorMsg += `: ${errorText.slice(0, 200)}`;
+    }
+    throw new Error(errorMsg);
   }
 
   const reader = response.body?.getReader();
-  if (!reader) throw new Error("Stream not supported");
+  if (!reader) throw new Error('Streaming not supported by this browser');
 
   const decoder = new TextDecoder();
   let buffer = '';
@@ -41,25 +72,21 @@ export const streamGemini = async (
     const { done, value } = await reader.read();
     if (done) break;
 
-    const chunk = decoder.decode(value, { stream: true });
-    buffer += chunk;
-    
+    buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
     buffer = lines.pop() || '';
 
     for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const dataStr = line.slice(6);
-        if (dataStr === '[DONE]') continue;
-        try {
-          const data = JSON.parse(dataStr);
-          if (data.candidates && data.candidates[0].content && data.candidates[0].content.parts) {
-            const text = data.candidates[0].content.parts[0].text;
-            if (text) onChunk(text);
-          }
-        } catch (e) {
-          console.error("Error parsing SSE chunk", e);
-        }
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data: ')) continue;
+      const dataStr = trimmed.slice(6);
+      if (dataStr === '[DONE]') continue;
+      try {
+        const data = JSON.parse(dataStr);
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) onChunk(text);
+      } catch {
+        // Ignore malformed chunks
       }
     }
   }
