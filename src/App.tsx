@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import type { User } from 'firebase/auth';
 import { Sidebar } from './components/Sidebar';
 import { Editor } from './components/Editor';
@@ -15,7 +15,7 @@ import { readDirectoryRecursive, readFileContent, saveFileContent, getLanguageFr
 import { runFirewall } from './lib/firewall';
 import { streamGemini } from './lib/gemini';
 import { onAuthChange, signOut, loadUserSettings, saveUserSettings, writeAuditLog, DEFAULT_USER_SETTINGS } from './lib/userAuth';
-import { checkPromptWithSlm, DEFAULT_SLM_SYSTEM_PROMPT } from './lib/ollamaGuard';
+import { checkPromptWithSlm, DEFAULT_SLM_SYSTEM_PROMPT, type SlmCheckResult } from './lib/ollamaGuard';
 
 const LOCAL_SETTINGS_KEY = 'relanto_ide_settings';
 
@@ -40,7 +40,6 @@ function App() {
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
 
   // ── IDE state ───────────────────────────────────────────────────────────
-  const [dirHandle, setDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [folderName, setFolderName] = useState<string | null>(null);
   const [files, setFiles] = useState<FileNode[]>([]);
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
@@ -103,7 +102,6 @@ function App() {
     try {
       // @ts-ignore
       const handle = await window.showDirectoryPicker();
-      setDirHandle(handle);
       setFolderName(handle.name);
       const nodes = await readDirectoryRecursive(handle);
       setFiles(nodes);
@@ -192,7 +190,7 @@ function App() {
     setLoadingText('Thinking...');
 
     // ── 1. Optional SLM Check (Ollama) ──
-    let slmResult = { safe: true, reason: '', violations: [], skipped: true, latencyMs: 0 };
+    let slmResult: SlmCheckResult = { safe: true, reason: '', violations: [], skipped: true, latencyMs: 0 };
     if (settings.firewall.slm?.enabled) {
       setLoadingText(`Checking SLM Guard (${settings.firewall.slm.model})...`);
       
@@ -346,8 +344,6 @@ function App() {
           isIndexing={isIndexing}
           indexingProgress={indexingProgress}
           onIndexWorkspace={handleIndexWorkspace}
-          user={currentUser}
-          onSignOut={signOut}
           loadingText={loadingText}
           onToggleSlm={(enabled) => setSettings(prev => ({
             ...prev,

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Shield, User, Lock, AlertTriangle, CheckCircle } from 'lucide-react';
+import { X, Shield, User, Lock, AlertTriangle } from 'lucide-react';
 import { checkAdminCredentials } from '../lib/userAuth';
 
 interface AdminLoginModalProps {
