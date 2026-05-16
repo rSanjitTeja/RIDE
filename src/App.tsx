@@ -15,12 +15,22 @@ import { readDirectoryRecursive, readFileContent, saveFileContent, getLanguageFr
 import { runFirewall } from './lib/firewall';
 import { streamGemini } from './lib/gemini';
 import { onAuthChange, signOut, loadUserSettings, saveUserSettings, writeAuditLog, DEFAULT_USER_SETTINGS } from './lib/userAuth';
+import { checkPromptWithSlm, DEFAULT_SLM_SYSTEM_PROMPT } from './lib/ollamaGuard';
 
 const LOCAL_SETTINGS_KEY = 'relanto_ide_settings';
 
 const INITIAL_SETTINGS: AppSettings = {
   apiKey: '',
   ...DEFAULT_USER_SETTINGS,
+  firewall: {
+    ...DEFAULT_USER_SETTINGS.firewall,
+    slm: {
+      enabled: false,
+      endpoint: 'http://localhost:11434',
+      model: 'phi3',
+      systemPrompt: DEFAULT_SLM_SYSTEM_PROMPT,
+    },
+  },
 };
 
 function App() {
@@ -39,6 +49,7 @@ function App() {
   // ── Agent state ─────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingText, setLoadingText] = useState('Thinking...');
   const [workspaceIndex, setWorkspaceIndex] = useState<WorkspaceIndex | null>(null);
   const [isIndexing, setIsIndexing] = useState(false);
   const [indexingProgress, setIndexingProgress] = useState(0);
@@ -177,6 +188,40 @@ function App() {
   const handleSendMessage = async (text: string) => {
     if (!settings.apiKey) { alert('Set your Gemini API key in settings.'); setIsSettingsOpen(true); return; }
 
+    setIsLoading(true); // Start loading earlier for SLM check
+    setLoadingText('Thinking...');
+
+    // ── 1. Optional SLM Check (Ollama) ──
+    let slmResult = { safe: true, reason: '', violations: [], skipped: true, latencyMs: 0 };
+    if (settings.firewall.slm?.enabled) {
+      setLoadingText(`Checking SLM Guard (${settings.firewall.slm.model})...`);
+      
+      slmResult = await checkPromptWithSlm(text, settings.firewall.slm);
+      console.log('[SLM Result]', slmResult);
+      
+      if (slmResult.skipped) {
+        const warningMsg: Message = { role: 'system', content: `_⚠️ SLM Guard failed open: ${slmResult.reason}_` };
+        setMessages(prev => [...prev, warningMsg]);
+        // Remove warning after 5 seconds
+        setTimeout(() => setMessages(prev => prev.filter(m => m !== warningMsg)), 5000);
+      }
+
+      if (!slmResult.safe && !slmResult.skipped) {
+        setIsLoading(false);
+        setLoadingText('Thinking...');
+        const uid = (user as User | null)?.uid;
+        if (uid) writeAuditLog(uid, { type: 'prompt_slm_block', originalLength: text.length, violations: slmResult.violations });
+        
+        setMessages(prev => [...prev, 
+          { role: 'user', content: text },
+          { role: 'system', content: `**🚫 Blocked by SLM Guard**\nReason: ${slmResult.reason}\nViolations: ${slmResult.violations.join(', ')}` }
+        ]);
+        return;
+      }
+    }
+    setLoadingText('Thinking...');
+
+    // ── 2. Rule-based Firewall Check ──
     const firewallResult = runFirewall(text, settings.firewall);
 
     // Log to Firestore if user is signed in
@@ -187,17 +232,21 @@ function App() {
         originalLength: text.length,
         verdict: firewallResult.passed ? 'PASSED' : 'BLOCKED',
         blockedBy: firewallResult.blockedBy || null,
+        slmLatency: slmResult.latencyMs,
       });
     }
 
-    if (!firewallResult.passed) { alert(`Blocked: ${firewallResult.blockedBy}`); return; }
+    if (!firewallResult.passed) { 
+      setIsLoading(false);
+      alert(`Blocked: ${firewallResult.blockedBy}`); 
+      return; 
+    }
 
     const payloadText = firewallResult.sanitizedText;
     const userMessage: Message = { role: 'user', content: payloadText };
     const cleanHistory = messages.filter(m => !m.content.startsWith('__INDEXED__'));
     const updatedHistory = [...cleanHistory, userMessage];
     setMessages(prev => [...prev, userMessage]);
-    setIsLoading(true);
 
     const systemPrompt = buildAgentSystemPrompt(
       workspaceIndex,
@@ -299,6 +348,11 @@ function App() {
           onIndexWorkspace={handleIndexWorkspace}
           user={currentUser}
           onSignOut={signOut}
+          loadingText={loadingText}
+          onToggleSlm={(enabled) => setSettings(prev => ({
+            ...prev,
+            firewall: { ...prev.firewall, slm: { ...prev.firewall.slm, enabled } }
+          }))}
         />
 
         <Terminal

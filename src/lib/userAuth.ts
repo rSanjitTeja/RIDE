@@ -10,6 +10,7 @@ import {
   doc, setDoc, getDoc, updateDoc, serverTimestamp
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
+import { DEFAULT_SLM_SYSTEM_PROMPT } from './ollamaGuard';
 import type { AppSettings } from '../types';
 
 // ── Admin credentials (hardcoded, not stored in Firebase) ──────────────────
@@ -29,6 +30,12 @@ export const DEFAULT_USER_SETTINGS: Omit<AppSettings, 'apiKey'> = {
     mode: 'block',
     rules: { emails: true, phones: true, creditCards: true, apiKeys: true, ssn: true },
     customRules: [],
+    slm: {
+      enabled: false,                        // OFF by default
+      endpoint: 'http://localhost:11434',
+      model: 'phi3',
+      systemPrompt: DEFAULT_SLM_SYSTEM_PROMPT,
+    },
   },
   workspace: { autoAttachOpenFiles: true, sendFileTree: false, workspaceIndexing: false },
   appearance: { fontSize: 14, fontFamily: "Consolas, 'Courier New', monospace" },

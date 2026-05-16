@@ -267,9 +267,61 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         ))}
                       </div>
                     </div>
+
+                    <div className="pt-4 border-t border-border mt-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <ShieldAlert size={14} className="text-purple-400" />
+                        <label className="block text-xs font-semibold text-text-main uppercase tracking-wider">Local SLM Guard (Ollama)</label>
+                      </div>
+                      <p className="text-[10px] text-text-muted mb-3 leading-relaxed">
+                        Pre-screen prompts for sensitive data using a local Small Language Model before sending to Gemini. Users can toggle this on/off per session, but admins control the endpoint and guard rail rules below.
+                      </p>
+                      
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-[10px] text-text-muted mb-1">Ollama Endpoint URL</label>
+                          <input
+                            type="text"
+                            value={settings.firewall.slm?.endpoint || ''}
+                            onChange={e => updateFirewall({ slm: { ...(settings.firewall.slm || { enabled: false, model: 'phi3', systemPrompt: '' }), endpoint: e.target.value } })}
+                            className="w-full bg-[#0a0c14] border border-border rounded px-2 py-1.5 text-xs focus:border-purple-500/50 focus:outline-none text-text-main font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-text-muted mb-1">SLM Model Name</label>
+                          <input
+                            type="text"
+                            value={settings.firewall.slm?.model || ''}
+                            onChange={e => updateFirewall({ slm: { ...(settings.firewall.slm || { enabled: false, endpoint: 'http://localhost:11434', systemPrompt: '' }), model: e.target.value } })}
+                            className="w-full bg-[#0a0c14] border border-border rounded px-2 py-1.5 text-xs focus:border-purple-500/50 focus:outline-none text-text-main font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-text-muted mb-1 flex justify-between">
+                            <span>Guard Rail System Prompt</span>
+                            <button 
+                              onClick={() => {
+                                import('../lib/ollamaGuard').then(({ DEFAULT_SLM_SYSTEM_PROMPT }) => {
+                                  updateFirewall({ slm: { ...(settings.firewall.slm || { enabled: false, endpoint: '', model: '' }), systemPrompt: DEFAULT_SLM_SYSTEM_PROMPT } });
+                                });
+                              }}
+                              className="text-purple-400 hover:text-purple-300 transition-colors"
+                            >
+                              Reset to Default
+                            </button>
+                          </label>
+                          <textarea
+                            value={settings.firewall.slm?.systemPrompt || ''}
+                            onChange={e => updateFirewall({ slm: { ...(settings.firewall.slm || { enabled: false, endpoint: '', model: '' }), systemPrompt: e.target.value } })}
+                            className="w-full h-32 bg-[#0a0c14] border border-border rounded px-2 py-2 text-[10px] focus:border-purple-500/50 focus:outline-none text-text-main font-mono custom-scrollbar resize-y"
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
+
             ) : (
               /* Lock screen */
               <div className="flex flex-col items-center justify-center h-full text-center py-8 space-y-4">

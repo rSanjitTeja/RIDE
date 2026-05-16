@@ -17,6 +17,8 @@ interface CopilotProps {
   isIndexing: boolean;
   indexingProgress: number;
   onIndexWorkspace: () => void;
+  onToggleSlm: (enabled: boolean) => void;
+  loadingText?: string;
 }
 
 // Simple inline code and bold renderer — avoids a full markdown dependency
@@ -79,6 +81,8 @@ export const Copilot: React.FC<CopilotProps> = ({
   isIndexing,
   indexingProgress,
   onIndexWorkspace,
+  onToggleSlm,
+  loadingText = 'Thinking...',
 }) => {
   const [input, setInput] = useState('');
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -144,11 +148,28 @@ export const Copilot: React.FC<CopilotProps> = ({
         </div>
 
         {/* Model pill */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-2">
           <span className="text-[10px] text-text-muted font-mono truncate max-w-[160px]">{settings.model}</span>
           <div className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${settings.firewall.enabled ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
             {settings.firewall.enabled ? 'FIREWALL ON' : 'FIREWALL OFF'}
           </div>
+        </div>
+
+        {/* SLM Toggle */}
+        <div className="flex items-center justify-between bg-surface border border-border rounded px-2 py-1.5 mt-1">
+          <div className="flex items-center space-x-1.5">
+            <ShieldAlert size={11} className="text-purple-400" />
+            <span className="text-[10px] font-medium text-text-main">Local SLM Guard</span>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input 
+              type="checkbox" 
+              className="sr-only peer" 
+              checked={settings.firewall.slm?.enabled ?? false}
+              onChange={(e) => onToggleSlm(e.target.checked)}
+            />
+            <div className="w-6 h-3.5 bg-[#0F111A] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-text-muted peer-checked:after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-purple-500/50 border border-border"></div>
+          </label>
         </div>
       </div>
 
@@ -239,46 +260,49 @@ export const Copilot: React.FC<CopilotProps> = ({
               </div>
             )}
 
-            {visibleMessages.filter(m => m.role !== 'system').map((msg, i) => (
-              <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                {/* Role indicator */}
-                <div className={`flex items-center gap-1.5 mb-1 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                  <div className={`w-5 h-5 rounded-full flex items-center justify-center ${msg.role === 'user' ? 'bg-primary' : 'bg-cyan-500/20 border border-cyan-500/30'}`}>
-                    {msg.role === 'user' ? <User size={10} className="text-white" /> : <Bot size={10} className="text-cyan-400" />}
-                  </div>
-                  <span className="text-[9px] text-text-muted">{msg.role === 'user' ? 'You' : 'Copilot'}</span>
-                </div>
-
-                <div className={`max-w-[95%] p-3 rounded-xl text-[12.5px] leading-relaxed shadow-md ${
-                  msg.role === 'user'
-                    ? 'bg-primary text-white rounded-tr-none'
-                    : 'bg-[#0F111A] border border-border text-text-main rounded-tl-none'
-                }`}>
-                  {msg.content.includes('[REDACTED]') ? (
-                    <div className="flex flex-col">
-                      <span>{msg.content}</span>
-                      <span className="text-[10px] text-yellow-400 mt-1 flex items-center">
-                        <AlertTriangle size={10} className="mr-1" /> Sanitized by Firewall
-                      </span>
+            {visibleMessages.map((msg, i) => {
+              if (msg.role === 'system') {
+                return (
+                  <div key={i} className="flex items-start my-2">
+                    <div className="max-w-[95%] p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-400 rounded-tl-none shadow-md">
+                      <div className="flex items-center gap-1 mb-1 font-semibold">
+                        <AlertTriangle size={11} /> {msg.content.includes('Error') || msg.content.includes('Blocked') ? 'Error' : 'System'}
+                      </div>
+                      <div className="space-y-1">{renderContent(msg.content.replace('Error: ', ''))}</div>
                     </div>
-                  ) : (
-                    <div className="space-y-1">{renderContent(msg.content)}</div>
-                  )}
-                </div>
-              </div>
-            ))}
-
-            {/* System error messages */}
-            {visibleMessages.filter(m => m.role === 'system').map((msg, i) => (
-              <div key={`sys-${i}`} className="flex items-start">
-                <div className="max-w-[95%] p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-400 rounded-tl-none shadow-md">
-                  <div className="flex items-center gap-1 mb-1 font-semibold">
-                    <AlertTriangle size={11} /> Error
                   </div>
-                  {msg.content.replace('Error: ', '')}
+                );
+              }
+
+              return (
+                <div key={i} className={`flex flex-col mb-3 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                  {/* Role indicator */}
+                  <div className={`flex items-center gap-1.5 mb-1 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                    <div className={`w-5 h-5 rounded-full flex items-center justify-center ${msg.role === 'user' ? 'bg-primary' : 'bg-cyan-500/20 border border-cyan-500/30'}`}>
+                      {msg.role === 'user' ? <User size={10} className="text-white" /> : <Bot size={10} className="text-cyan-400" />}
+                    </div>
+                    <span className="text-[9px] text-text-muted">{msg.role === 'user' ? 'You' : 'Copilot'}</span>
+                  </div>
+
+                  <div className={`max-w-[95%] p-3 rounded-xl text-[12.5px] leading-relaxed shadow-md ${
+                    msg.role === 'user'
+                      ? 'bg-primary text-white rounded-tr-none'
+                      : 'bg-[#0F111A] border border-border text-text-main rounded-tl-none'
+                  }`}>
+                    {msg.content.includes('[REDACTED]') ? (
+                      <div className="flex flex-col">
+                        <span>{msg.content}</span>
+                        <span className="text-[10px] text-yellow-400 mt-1 flex items-center">
+                          <AlertTriangle size={10} className="mr-1" /> Sanitized by Firewall
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">{renderContent(msg.content)}</div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </>
         )}
 
@@ -295,7 +319,7 @@ export const Copilot: React.FC<CopilotProps> = ({
                   />
                 ))}
               </div>
-              <span className="text-[10px] text-text-muted">Thinking...</span>
+              <span className="text-[10px] text-text-muted">{loadingText}</span>
             </div>
           </div>
         )}

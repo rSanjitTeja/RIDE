@@ -20,6 +20,13 @@ export interface Message {
   content: string;
 }
 
+export interface SlmSettings {
+  enabled: boolean;        // User-toggled per session
+  endpoint: string;        // Admin: default http://localhost:11434
+  model: string;           // Admin: default phi3
+  systemPrompt: string;    // Admin: editable guard-rail prompt
+}
+
 export interface FirewallSettings {
   enabled: boolean;
   mode: 'block' | 'warn';
@@ -31,6 +38,7 @@ export interface FirewallSettings {
     ssn: boolean;
   };
   customRules: string[];
+  slm: SlmSettings;
 }
 
 export interface AppSettings {
