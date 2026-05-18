@@ -13,7 +13,7 @@ import { indexWorkspace, buildAgentSystemPrompt } from './lib/workspaceAgent';
 import type { FileNode, OpenFile, Message, AppSettings, WorkspaceIndex } from './types';
 import { readDirectoryRecursive, readFileContent, saveFileContent, getLanguageFromExtension } from './lib/fileSystem';
 import { runFirewall } from './lib/firewall';
-import { streamGemini } from './lib/gemini';
+import { streamGemini, generateGemini } from './lib/gemini';
 import { onAuthChange, signOut, loadUserSettings, saveUserSettings, writeAuditLog, DEFAULT_USER_SETTINGS } from './lib/userAuth';
 import { checkPromptWithSlm, DEFAULT_SLM_SYSTEM_PROMPT, type SlmCheckResult } from './lib/ollamaGuard';
 
@@ -44,6 +44,8 @@ function App() {
   const [files, setFiles] = useState<FileNode[]>([]);
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFileIndex, setActiveFileIndex] = useState<number>(-1);
+  const [editorInstance, setEditorInstance] = useState<any>(null);
+  const [pendingDiff, setPendingDiff] = useState<{ original: string; modified: string } | null>(null);
 
   // ── Agent state ─────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<Message[]>([]);
@@ -127,6 +129,7 @@ function App() {
   };
 
   const handleFileSelect = async (node: FileNode) => {
+    setPendingDiff(null);
     if (node.kind !== 'file') return;
     const existingIndex = openFiles.findIndex(f => f.path === node.path);
     if (existingIndex >= 0) { setActiveFileIndex(existingIndex); return; }
@@ -142,6 +145,7 @@ function App() {
   };
 
   const handleFileClose = (index: number) => {
+    setPendingDiff(null);
     setOpenFiles(prev => { const n = [...prev]; n.splice(index, 1); return n; });
     setActiveFileIndex(prev => openFiles.length <= 1 ? -1 : Math.max(0, index > prev ? prev : prev - 1));
   };
@@ -181,6 +185,91 @@ function App() {
     } finally {
       setIsExecuting(false);
     }
+  };
+
+  const handleApplyCode = async (code: string) => {
+    if (!editorInstance) {
+      alert("Please open a file in the editor first.");
+      return;
+    }
+    
+    if (activeFileIndex === -1) return;
+    const activeFile = openFiles[activeFileIndex];
+
+    const selection = editorInstance.getSelection();
+    const hasRealSelection = selection && (selection.startLineNumber !== selection.endLineNumber || selection.startColumn !== selection.endColumn);
+
+    if (hasRealSelection) {
+      const model = editorInstance.getModel();
+      const startOffset = model.getOffsetAt(selection.getStartPosition());
+      const endOffset = model.getOffsetAt(selection.getEndPosition());
+      const newContent = activeFile.content.substring(0, startOffset) + code + activeFile.content.substring(endOffset);
+
+      setPendingDiff({
+        original: activeFile.content,
+        modified: newContent
+      });
+      return;
+    }
+
+    if (!settings.apiKey) {
+      alert('Set your Gemini API key in settings to use Smart Apply.');
+      setIsSettingsOpen(true);
+      return;
+    }
+
+    setLoadingText('Merging...');
+    // We don't set isLoading(true) here so we don't block the UI, the diff editor itself will show the streaming
+    // Let's instantly open the diff view so it feels fast
+    let currentMerged = '';
+    setPendingDiff({
+      original: activeFile.content,
+      modified: currentMerged
+    });
+
+    try {
+      const systemPrompt = `You are an expert coding assistant. Merge the provided code snippet into the provided file content intelligently.
+Rules:
+1. Replace existing functions if they overlap.
+2. Insert new ones at a logical place (e.g., end of the file).
+3. Do NOT add markdown formatting. Output ONLY the raw file content. No \`\`\` language tags, no explanations.
+4. Ensure the resulting code is syntactically correct and fully intact.`;
+
+      const prompt = `File: ${activeFile.name}\nLanguage: ${activeFile.language}\n\n=== CURRENT FILE CONTENT ===\n${activeFile.content}\n\n=== CODE TO MERGE ===\n${code}\n\n=== OUTPUT ONLY THE RAW FINAL MERGED FILE CONTENT ===`;
+
+      await streamGemini(
+        [{ role: 'user', content: prompt }],
+        systemPrompt,
+        settings.apiKey,
+        settings.model,
+        (chunk) => {
+          currentMerged += chunk;
+          setPendingDiff(prev => {
+            if (!prev) return null; // If user closed it
+            return {
+              original: prev.original,
+              modified: currentMerged.replace(/^```[a-z]*\n?/gm, '').replace(/```$/gm, '')
+            };
+          });
+        }
+      );
+    } catch (e: any) {
+      alert(`Smart Apply failed: ${e.message}`);
+    } finally {
+      setIsLoading(false);
+      setLoadingText('Thinking...');
+    }
+  };
+
+  const handleAcceptDiff = () => {
+    if (pendingDiff && activeFileIndex !== -1) {
+      handleContentChange(pendingDiff.modified);
+    }
+    setPendingDiff(null);
+  };
+
+  const handleRejectDiff = () => {
+    setPendingDiff(null);
   };
 
   const handleSendMessage = async (text: string) => {
@@ -326,11 +415,18 @@ function App() {
           openFiles={openFiles}
           activeFileIndex={activeFileIndex}
           onFileClose={handleFileClose}
-          onFileSelect={setActiveFileIndex}
+          onFileSelect={(idx) => {
+            setActiveFileIndex(idx);
+            setPendingDiff(null);
+          }}
           onContentChange={handleContentChange}
           onSave={handleSave}
           onRun={handleRunCode}
           settings={settings}
+          onEditorMount={(editor) => setEditorInstance(editor)}
+          pendingDiff={pendingDiff}
+          onAcceptDiff={handleAcceptDiff}
+          onRejectDiff={handleRejectDiff}
         />
         <Copilot
           messages={messages}
@@ -349,6 +445,7 @@ function App() {
             ...prev,
             firewall: { ...prev.firewall, slm: { ...prev.firewall.slm, enabled } }
           }))}
+          onApplyCode={handleApplyCode}
         />
 
         <Terminal

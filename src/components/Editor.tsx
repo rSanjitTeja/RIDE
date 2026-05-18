@@ -1,6 +1,6 @@
-import MonacoEditor from '@monaco-editor/react';
+import MonacoEditor, { DiffEditor } from '@monaco-editor/react';
 import type { OpenFile } from '../types';
-import { X, Play } from 'lucide-react';
+import { X, Play, Check, XCircle } from 'lucide-react';
 
 interface EditorProps {
   openFiles: OpenFile[];
@@ -11,6 +11,10 @@ interface EditorProps {
   onSave: () => void;
   onRun: () => void;
   settings: any;
+  onEditorMount?: (editor: any, monaco: any) => void;
+  pendingDiff?: { original: string; modified: string } | null;
+  onAcceptDiff?: () => void;
+  onRejectDiff?: () => void;
 }
 
 export const Editor: React.FC<EditorProps> = ({
@@ -21,7 +25,11 @@ export const Editor: React.FC<EditorProps> = ({
   onContentChange,
   onSave,
   onRun,
-  settings
+  settings,
+  onEditorMount,
+  pendingDiff,
+  onAcceptDiff,
+  onRejectDiff
 }) => {
   const activeFile = openFiles[activeFileIndex];
 
@@ -85,6 +93,33 @@ export const Editor: React.FC<EditorProps> = ({
               </div>
             </div>
           </div>
+        ) : pendingDiff ? (
+          <div className="relative h-full w-full flex flex-col bg-[#1E1E1E]">
+            <div className="absolute top-4 right-8 z-10 flex gap-2 shadow-xl bg-[#0F111A] p-1 rounded border border-border">
+              <button onClick={onAcceptDiff} className="flex items-center gap-1.5 bg-green-500/20 hover:bg-green-500/40 text-green-400 border border-green-500/30 px-3 py-1.5 rounded transition-all text-xs font-semibold">
+                <Check size={14} /> Accept
+              </button>
+              <button onClick={onRejectDiff} className="flex items-center gap-1.5 bg-red-500/20 hover:bg-red-500/40 text-red-400 border border-red-500/30 px-3 py-1.5 rounded transition-all text-xs font-semibold">
+                <XCircle size={14} /> Reject
+              </button>
+            </div>
+            <DiffEditor
+              theme="vs-dark"
+              language={activeFile.language}
+              original={pendingDiff.original}
+              modified={pendingDiff.modified}
+              options={{
+                renderSideBySide: false, // Inline diff!
+                fontSize: settings.appearance.fontSize,
+                fontFamily: settings.appearance.fontFamily,
+                minimap: { enabled: false },
+                wordWrap: 'on',
+                padding: { top: 16 },
+                readOnly: true,
+                scrollBeyondLastLine: false,
+              }}
+            />
+          </div>
         ) : (
           <MonacoEditor
             theme="vs-dark"
@@ -104,6 +139,9 @@ export const Editor: React.FC<EditorProps> = ({
               quickSuggestions: true,
             }}
             onMount={(editor, monaco) => {
+              if (onEditorMount) {
+                onEditorMount(editor, monaco);
+              }
               editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
                 onSave();
               });

@@ -19,10 +19,11 @@ interface CopilotProps {
   onIndexWorkspace: () => void;
   onToggleSlm: (enabled: boolean) => void;
   loadingText?: string;
+  onApplyCode?: (code: string) => void;
 }
 
 // Simple inline code and bold renderer — avoids a full markdown dependency
-function renderContent(text: string): React.ReactNode {
+function renderContent(text: string, onApplyCode?: (code: string) => void): React.ReactNode {
   const parts = text.split(/(```[\s\S]*?```|`[^`]+`|\*\*[^*]+\*\*)/g);
   return parts.map((part, i) => {
     if (part.startsWith('```') && part.endsWith('```')) {
@@ -31,7 +32,7 @@ function renderContent(text: string): React.ReactNode {
       const lang = newlineIdx > 0 ? inner.slice(0, newlineIdx).trim() : '';
       const code = newlineIdx > 0 ? inner.slice(newlineIdx + 1) : inner;
       return (
-        <CodeBlock key={i} code={code} lang={lang} />
+        <CodeBlock key={i} code={code} lang={lang} onApplyCode={onApplyCode} />
       );
     }
     if (part.startsWith('`') && part.endsWith('`')) {
@@ -47,7 +48,7 @@ function renderContent(text: string): React.ReactNode {
   });
 }
 
-function CodeBlock({ code, lang }: { code: string; lang: string }) {
+function CodeBlock({ code, lang, onApplyCode }: { code: string; lang: string; onApplyCode?: (code: string) => void }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
     navigator.clipboard.writeText(code);
@@ -58,9 +59,20 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
     <div className="my-2 rounded-lg overflow-hidden border border-border">
       <div className="flex items-center justify-between bg-[#0F111A] px-3 py-1.5">
         <span className="text-[10px] text-text-muted font-mono uppercase tracking-widest">{lang || 'code'}</span>
-        <button onClick={copy} className="text-text-muted hover:text-white transition-colors">
-          {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
-        </button>
+        <div className="flex items-center gap-2">
+          {onApplyCode && (
+            <button 
+              onClick={() => onApplyCode(code)} 
+              className="flex items-center gap-1 text-[10px] text-cyan-400 hover:text-cyan-300 transition-colors bg-cyan-500/10 hover:bg-cyan-500/20 px-1.5 py-0.5 rounded border border-cyan-500/20"
+              title="Apply to Editor"
+            >
+              <Bot size={10} /> Apply
+            </button>
+          )}
+          <button onClick={copy} className="text-text-muted hover:text-white transition-colors" title="Copy code">
+            {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+          </button>
+        </div>
       </div>
       <pre className="bg-[#0a0c14] p-3 overflow-x-auto text-[12px] font-mono text-text-main leading-relaxed custom-scrollbar">
         <code>{code}</code>
@@ -83,6 +95,7 @@ export const Copilot: React.FC<CopilotProps> = ({
   onIndexWorkspace,
   onToggleSlm,
   loadingText = 'Thinking...',
+  onApplyCode,
 }) => {
   const [input, setInput] = useState('');
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -268,7 +281,7 @@ export const Copilot: React.FC<CopilotProps> = ({
                       <div className="flex items-center gap-1 mb-1 font-semibold">
                         <AlertTriangle size={11} /> {msg.content.includes('Error') || msg.content.includes('Blocked') ? 'Error' : 'System'}
                       </div>
-                      <div className="space-y-1">{renderContent(msg.content.replace('Error: ', ''))}</div>
+                      <div className="space-y-1">{renderContent(msg.content.replace('Error: ', ''), onApplyCode)}</div>
                     </div>
                   </div>
                 );
@@ -297,7 +310,7 @@ export const Copilot: React.FC<CopilotProps> = ({
                         </span>
                       </div>
                     ) : (
-                      <div className="space-y-1">{renderContent(msg.content)}</div>
+                      <div className="space-y-1">{renderContent(msg.content, onApplyCode)}</div>
                     )}
                   </div>
                 </div>

@@ -91,3 +91,52 @@ export const streamGemini = async (
     }
   }
 };
+
+/**
+ * Makes a single non-streaming call to Gemini. Useful for background tasks like smart merging.
+ */
+export const generateGemini = async (
+  prompt: string,
+  systemPrompt: string,
+  apiKey: string,
+  modelName: string
+): Promise<string> => {
+  const model = modelName || 'gemini-2.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const payload = {
+    system_instruction: {
+      parts: [{ text: systemPrompt }],
+    },
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: prompt }],
+      }
+    ],
+    generationConfig: {
+      temperature: 0.1, // Low temperature for code consistency
+      topK: 40,
+      topP: 0.95,
+    },
+  };
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (e: any) {
+    throw new Error(`Network error: ${e.message}`);
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API Error: ${errorText}`);
+  }
+
+  const data = await response.json();
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+};
