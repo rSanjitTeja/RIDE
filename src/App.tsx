@@ -13,7 +13,7 @@ import { indexWorkspace, buildAgentSystemPrompt } from './lib/workspaceAgent';
 import type { FileNode, OpenFile, Message, AppSettings, WorkspaceIndex } from './types';
 import { readDirectoryRecursive, readFileContent, saveFileContent, getLanguageFromExtension } from './lib/fileSystem';
 import { runFirewall } from './lib/firewall';
-import { streamGemini, generateGemini } from './lib/gemini';
+import { streamGemini } from './lib/gemini';
 import { onAuthChange, signOut, loadUserSettings, saveUserSettings, writeAuditLog, DEFAULT_USER_SETTINGS } from './lib/userAuth';
 import { checkPromptWithSlm, DEFAULT_SLM_SYSTEM_PROMPT, type SlmCheckResult } from './lib/ollamaGuard';
 
