@@ -278,6 +278,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       </p>
                       
                       <div className="space-y-3">
+                        <div className="flex items-center justify-between text-xs py-1 border-b border-border/50 mb-2">
+                          <span className="text-[10px] text-text-muted">Check Scraped Web Content via SLM</span>
+                          <input
+                            type="checkbox"
+                            checked={settings.firewall.slm?.checkWebScrapes || false}
+                            onChange={e => updateFirewall({
+                              slm: {
+                                ...(settings.firewall.slm || { enabled: false, endpoint: '', model: '', systemPrompt: '', checkWebScrapes: false }),
+                                checkWebScrapes: e.target.checked
+                              }
+                            })}
+                          />
+                        </div>
                         <div>
                           <label className="block text-[10px] text-text-muted mb-1">Ollama Endpoint URL</label>
                           <input
@@ -292,7 +305,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           <input
                             type="text"
                             value={settings.firewall.slm?.model || ''}
-                            onChange={e => updateFirewall({ slm: { ...(settings.firewall.slm || { enabled: false, endpoint: 'http://localhost:11434', systemPrompt: '' }), model: e.target.value } })}
+                            onChange={e => updateFirewall({ slm: { ...(settings.firewall.slm || { enabled: false, endpoint: 'http://127.0.0.1:11434', systemPrompt: '' }), model: e.target.value } })}
                             className="w-full bg-[#0a0c14] border border-border rounded px-2 py-1.5 text-xs focus:border-purple-500/50 focus:outline-none text-text-main font-mono"
                           />
                         </div>

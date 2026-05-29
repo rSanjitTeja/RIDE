@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { User } from 'firebase/auth';
+import { Search, Loader2 } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { Editor } from './components/Editor';
 import { Copilot } from './components/Copilot';
@@ -26,9 +27,10 @@ const INITIAL_SETTINGS: AppSettings = {
     ...DEFAULT_USER_SETTINGS.firewall,
     slm: {
       enabled: false,
-      endpoint: 'http://localhost:11434',
+      endpoint: 'http://127.0.0.1:11434',
       model: 'phi3',
       systemPrompt: DEFAULT_SLM_SYSTEM_PROMPT,
+      checkWebScrapes: false,
     },
   },
 };
@@ -63,6 +65,10 @@ function App() {
   const [terminalOutput, setTerminalOutput] = useState('');
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
+
+  // ── Web Search ─────────────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
 
   // ── Firebase Auth listener ──────────────────────────────────────────────
   useEffect(() => {
@@ -272,7 +278,7 @@ Rules:
     setPendingDiff(null);
   };
 
-  const handleSendMessage = async (text: string) => {
+  const handleSendMessage = async (text: string, isWebScrape = false) => {
     if (!settings.apiKey) { alert('Set your Gemini API key in settings.'); setIsSettingsOpen(true); return; }
 
     setIsLoading(true); // Start loading earlier for SLM check
@@ -280,14 +286,15 @@ Rules:
 
     // ── 1. Optional SLM Check (Ollama) ──
     let slmResult: SlmCheckResult = { safe: true, reason: '', violations: [], skipped: true, latencyMs: 0 };
-    if (settings.firewall.slm?.enabled) {
+    const shouldCheckSlm = settings.firewall.slm?.enabled && (!isWebScrape || settings.firewall.slm.checkWebScrapes);
+    if (shouldCheckSlm) {
       setLoadingText(`Checking SLM Guard (${settings.firewall.slm.model})...`);
       
       slmResult = await checkPromptWithSlm(text, settings.firewall.slm);
       console.log('[SLM Result]', slmResult);
       
       if (slmResult.skipped) {
-        const warningMsg: Message = { role: 'system', content: `_⚠️ SLM Guard failed open: ${slmResult.reason}_` };
+        const warningMsg: Message = { role: 'system', content: `_⚠️ SLM Guard (Input) failed open: ${slmResult.reason}. Warning: Your prompt was not verified for sensitive or malicious content._` };
         setMessages(prev => [...prev, warningMsg]);
         // Remove warning after 5 seconds
         setTimeout(() => setMessages(prev => prev.filter(m => m !== warningMsg)), 5000);
@@ -331,7 +338,25 @@ Rules:
 
     const payloadText = firewallResult.sanitizedText;
     const userMessage: Message = { role: 'user', content: payloadText };
-    const cleanHistory = messages.filter(m => !m.content.startsWith('__INDEXED__'));
+    // Clean history: remove indexing info and any blocked messages + the user messages that caused them
+    const cleanHistory = messages.filter((m, i, arr) => {
+      if (m.content.startsWith('__INDEXED__')) return false;
+      
+      // Filter out system error/block messages
+      if (m.role === 'system' && (m.content.includes('Blocked by SLM Guard') || m.content.includes('Error'))) return false;
+      
+      // Filter out the user message IMMEDIATELY preceding a block message
+      if (m.role === 'user' && i < arr.length - 1) {
+        const nextMsg = arr[i + 1];
+        if (nextMsg.role === 'system' && nextMsg.content.includes('Blocked by SLM Guard')) {
+          return false;
+        }
+      }
+      
+      // Filter out model messages that were blocked (although they are usually replaced by the system message)
+      return true;
+    });
+    
     const updatedHistory = [...cleanHistory, userMessage];
     setMessages(prev => [...prev, userMessage]);
 
@@ -344,15 +369,48 @@ Rules:
       const placeholder: Message = { role: 'model', content: '' };
       setMessages(prev => [...prev, placeholder]);
 
+      let fullResponse = '';
+
       await streamGemini(updatedHistory, systemPrompt, settings.apiKey, settings.model, (chunk) => {
         setMessages(prev => {
           const n = [...prev];
           const last = n.length - 1;
           const fw = runFirewall(chunk, settings.firewall);
+          fullResponse += fw.sanitizedText;
           n[last] = { ...n[last], content: n[last].content + fw.sanitizedText };
           return n;
         });
       });
+
+      // ── 3. Optional SLM Check on LLM Output ──
+      if (shouldCheckSlm) {
+        setIsLoading(true);
+        setLoadingText(`Checking Output with SLM Guard (${settings.firewall.slm.model})...`);
+        
+        const slmOutResult = await checkPromptWithSlm(fullResponse, settings.firewall.slm);
+        
+        if (slmOutResult.skipped) {
+          const warningMsg: Message = { role: 'system', content: `_⚠️ SLM Guard (Output) failed open: ${slmOutResult.reason}. Warning: The output could not be verified and may contain malicious code or injected payloads. Please review carefully._` };
+          setMessages(prev => [...prev, warningMsg]);
+        } else if (!slmOutResult.safe) {
+          if (uid) writeAuditLog(uid, { type: 'response_slm_block', originalLength: fullResponse.length, violations: slmOutResult.violations });
+          
+          setMessages(prev => {
+            const n = [...prev];
+            n[n.length - 1] = { 
+              role: 'system', 
+              content: `**🚫 Output Blocked by SLM Guard**\nReason: ${slmOutResult.reason}\nViolations: ${slmOutResult.violations.join(', ')}` 
+            };
+            return n;
+          });
+        } else {
+          setMessages(prev => {
+            const n = [...prev];
+            n[n.length - 1] = { ...n[n.length - 1], slmVerified: true };
+            return n;
+          });
+        }
+      }
 
       // Log response
       if (uid) {
@@ -366,6 +424,40 @@ Rules:
       setMessages(prev => [...prev, { role: 'system', content: `Error: ${e.message}` }]);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleWebSearch = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && searchQuery.trim()) {
+      setIsSearching(true);
+      try {
+        // We bypass proxies entirely and use Wikipedia's official API with native CORS
+        const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(searchQuery)}&utf8=&format=json&origin=*`;
+        const wikiRes = await fetch(wikiUrl);
+        if (!wikiRes.ok) throw new Error('Search API failed');
+        
+        const wikiData = await wikiRes.json();
+        
+        if (wikiData.query && wikiData.query.search.length > 0) {
+          let scrapeContext = `I searched Wikipedia for "${searchQuery}":\n\n`;
+          wikiData.query.search.slice(0, 5).forEach((item: any, i: number) => {
+             // Remove HTML tags using regex (similar to what BeautifulSoup does)
+             const cleanSnippet = item.snippet.replace(/<[^>]*>?/gm, '');
+             scrapeContext += `${i + 1}. **${item.title}**: ${cleanSnippet}\n\n`;
+          });
+          scrapeContext += `Please analyze this real-time context and help me.`;
+          
+          await handleSendMessage(scrapeContext, true);
+          setSearchQuery('');
+        } else {
+          alert('No search results found.');
+        }
+      } catch (err: any) {
+        console.error(err);
+        alert(`Failed to scrape web: ${err.message}`);
+      } finally {
+        setIsSearching(false);
+      }
     }
   };
 
@@ -392,19 +484,40 @@ Rules:
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-background text-text-main font-sans">
       {/* Title Bar */}
-      <div className="h-8 bg-[#0F111A] flex items-center px-3 border-b border-border select-none window-drag flex-shrink-0">
-        <div className="flex space-x-2 mr-4">
-          <button onClick={() => signOut()} className="w-3 h-3 rounded-full bg-red-500 hover:bg-red-400 transition-colors" title="Sign out" />
-          <div className="w-3 h-3 rounded-full bg-yellow-500" />
-          <div className="w-3 h-3 rounded-full bg-green-500" />
+      <div className="h-10 bg-[#0F111A] flex items-center px-3 border-b border-border select-none window-drag flex-shrink-0">
+        <div className="flex items-center w-64 mr-4">
+          <div className="flex space-x-2 mr-4">
+            <button onClick={() => signOut()} className="w-3 h-3 rounded-full bg-red-500 hover:bg-red-400 transition-colors" title="Sign out" />
+            <div className="w-3 h-3 rounded-full bg-yellow-500" />
+            <div className="w-3 h-3 rounded-full bg-green-500" />
+          </div>
+          <div className="text-xs font-semibold tracking-wider text-text-muted truncate">
+            RelantoIDE {folderName ? `— ${folderName}` : ''}
+          </div>
         </div>
-        <div className="text-xs font-semibold tracking-wider text-text-muted flex-1 text-center">
-          RelantoIDE {folderName ? `— ${folderName}` : ''}
-          {workspaceIndex && <span className="ml-2 text-cyan-400 font-normal">· {workspaceIndex.totalFiles} files indexed</span>}
+        
+        <div className="flex-1 flex justify-center no-drag">
+          <div className="relative w-full max-w-xl group">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted group-focus-within:text-cyan-400 transition-colors" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={handleWebSearch}
+              disabled={isSearching}
+              placeholder="Scrape the web for docs or solutions (Press Enter)..."
+              className="w-full bg-[#1A1D27] hover:bg-[#232736] focus:bg-[#232736] border border-border focus:border-cyan-500/50 rounded-md py-1.5 pl-9 pr-8 text-xs text-text-main placeholder:text-text-muted/50 outline-none transition-all"
+            />
+            {isSearching && (
+              <Loader2 size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 animate-spin" />
+            )}
+          </div>
         </div>
-        <div className="text-[10px] text-text-muted flex items-center gap-1.5">
+
+        <div className="w-64 text-[10px] text-text-muted flex items-center justify-end gap-2 truncate">
+          {workspaceIndex && <span className="text-cyan-400 font-normal">{workspaceIndex.totalFiles} files indexed</span>}
           <div className="w-1.5 h-1.5 rounded-full bg-green-400" />
-          {currentUser.displayName || currentUser.email}
+          <span className="truncate">{currentUser.displayName || currentUser.email}</span>
         </div>
       </div>
 

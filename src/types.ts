@@ -18,6 +18,7 @@ export interface OpenFile {
 export interface Message {
   role: 'user' | 'model' | 'system';
   content: string;
+  slmVerified?: boolean;
 }
 
 export interface SlmSettings {
@@ -25,6 +26,7 @@ export interface SlmSettings {
   endpoint: string;        // Admin: default http://localhost:11434
   model: string;           // Admin: default phi3
   systemPrompt: string;    // Admin: editable guard-rail prompt
+  checkWebScrapes: boolean; // Pre-screen scraped web data via SLM
 }
 
 export interface FirewallSettings {

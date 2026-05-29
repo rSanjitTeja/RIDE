@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   Settings as SettingsIcon, Send, AlertTriangle, ShieldAlert,
-  Database, RefreshCw, Trash2, ChevronDown, Bot, User, Copy, Check
+  Database, RefreshCw, Trash2, ChevronDown, Bot, User, Copy, Check,
+  Mic, MicOff
 } from 'lucide-react';
 import type { Message, OpenFile, AppSettings, WorkspaceIndex } from '../types';
 
@@ -98,9 +99,74 @@ export const Copilot: React.FC<CopilotProps> = ({
   onApplyCode,
 }) => {
   const [input, setInput] = useState('');
+  const [isListening, setIsListening] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
+  const baseInputRef = useRef('');
+
+  useEffect(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const rec = new SpeechRecognition();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = 'en-US';
+
+      rec.onresult = (event: any) => {
+        let finalTranscript = '';
+        let interimTranscript = '';
+
+        for (let i = 0; i < event.results.length; ++i) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+
+        const base = baseInputRef.current;
+        const separator = base === '' || base.endsWith(' ') ? '' : ' ';
+        setInput(base + separator + finalTranscript + interimTranscript);
+      };
+
+      rec.onerror = (event: any) => {
+        console.error('Speech recognition error', event.error);
+        setIsListening(false);
+        if (event.error === 'not-allowed') {
+          alert('Microphone permission blocked. Please check your browser settings.');
+        }
+      };
+
+      rec.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = rec;
+    }
+  }, []);
+
+  const toggleListening = () => {
+    if (!recognitionRef.current) {
+      alert('Speech Recognition is not supported in this browser. Please use Chrome or Edge.');
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      try {
+        baseInputRef.current = input; // Capture current typed text before voice starts
+        recognitionRef.current.start();
+        setIsListening(true);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -312,6 +378,12 @@ export const Copilot: React.FC<CopilotProps> = ({
                     ) : (
                       <div className="space-y-1">{renderContent(msg.content, onApplyCode)}</div>
                     )}
+                    {msg.slmVerified && (
+                      <div className="mt-2 pt-2 border-t border-border/50 flex items-center text-[9px] text-green-400 font-medium">
+                        <ShieldAlert size={10} className="mr-1" />
+                        Verified by SLM Guard
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -374,16 +446,29 @@ export const Copilot: React.FC<CopilotProps> = ({
               }
             }}
             placeholder={workspaceIndex ? 'Ask about your codebase...' : 'Ask Copilot anything...'}
-            className="flex-1 bg-surface text-[12.5px] text-text-main border border-border rounded-xl p-3 pr-10 resize-none focus:outline-none focus:border-cyan-500/50 transition-colors min-h-[52px] max-h-[120px] custom-scrollbar placeholder-text-muted/50"
+            className="flex-1 bg-surface text-[12.5px] text-text-main border border-border rounded-xl p-3 pr-20 resize-none focus:outline-none focus:border-cyan-500/50 transition-colors min-h-[52px] max-h-[120px] custom-scrollbar placeholder-text-muted/50"
             rows={2}
           />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || isLoading}
-            className="absolute right-2 bottom-2 p-1.5 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md"
-          >
-            <Send size={13} />
-          </button>
+          <div className="absolute right-2 bottom-2 flex items-center gap-1.5">
+            <button
+              onClick={toggleListening}
+              className={`p-1.5 rounded-lg transition-all shadow-md ${
+                isListening 
+                  ? 'bg-red-500 text-white animate-pulse' 
+                  : 'bg-surface border border-border text-text-muted hover:text-white hover:border-text-muted'
+              }`}
+              title={isListening ? "Stop listening" : "Dictate query"}
+            >
+              {isListening ? <MicOff size={13} /> : <Mic size={13} />}
+            </button>
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || isLoading}
+              className="p-1.5 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md"
+            >
+              <Send size={13} />
+            </button>
+          </div>
         </div>
         <p className="text-[9px] text-text-muted mt-1.5 text-center opacity-50">
           Enter to send · Shift+Enter for newline

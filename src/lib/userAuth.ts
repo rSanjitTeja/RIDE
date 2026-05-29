@@ -35,6 +35,7 @@ export const DEFAULT_USER_SETTINGS: Omit<AppSettings, 'apiKey'> = {
       endpoint: 'http://localhost:11434',
       model: 'phi3',
       systemPrompt: DEFAULT_SLM_SYSTEM_PROMPT,
+      checkWebScrapes: false,
     },
   },
   workspace: { autoAttachOpenFiles: true, sendFileTree: false, workspaceIndexing: false },
